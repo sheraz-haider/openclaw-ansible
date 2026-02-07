@@ -122,6 +122,36 @@ openclaw logs
 
 Enable with: `-e openclaw_install_mode=development`
 
+## Update OpenClaw
+
+Recommended: re-run the playbook so updates stay aligned with your managed configuration.
+
+```bash
+cd openclaw-ansible
+ansible-playbook playbook.yml --ask-become-pass
+```
+
+If you need to update manually:
+
+### Release Mode
+
+```bash
+sudo -u openclaw env \
+  PNPM_HOME=/home/openclaw/.local/share/pnpm \
+  PATH=/home/openclaw/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin \
+  HOME=/home/openclaw \
+  pnpm install -g openclaw@latest
+
+sudo systemctl restart openclaw
+```
+
+### Development Mode
+
+```bash
+sudo -u openclaw bash -lc 'cd /home/openclaw/code/openclaw && git pull && pnpm install && pnpm build'
+sudo systemctl restart openclaw
+```
+
 ## Security
 
 - **Public ports**: SSH (22), Tailscale (41641/udp) only
