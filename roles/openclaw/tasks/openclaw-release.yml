@@ -14,6 +14,10 @@
   register: openclaw_install
   changed_when: "'Already up to date' not in openclaw_install.stdout"
 
+- name: Record whether release binary changed
+  ansible.builtin.set_fact:
+    openclaw_binary_changed: "{{ openclaw_install.changed }}"
+
 - name: Verify openclaw installation
   ansible.builtin.shell:
     cmd: openclaw --version

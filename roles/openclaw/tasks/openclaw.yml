@@ -88,6 +88,95 @@
   ansible.builtin.include_tasks: openclaw-development.yml
   when: openclaw_install_mode == "development"
 
+- name: Check if OpenClaw user systemd service exists
+  ansible.builtin.stat:
+    path: "{{ openclaw_home }}/.config/systemd/user/openclaw-gateway.service"
+  register: openclaw_user_service_file
+  when: ansible_os_family == 'Debian' and not ci_test
+
+- name: Check if OpenClaw systemd service exists
+  ansible.builtin.stat:
+    path: /etc/systemd/system/openclaw.service
+  register: openclaw_service_file
+  when: ansible_os_family == 'Debian' and not ci_test
+
+- name: Check whether OpenClaw user service is currently active
+  ansible.builtin.command: systemctl --user is-active openclaw-gateway
+  become: true
+  become_user: "{{ openclaw_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ openclaw_uid_value }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ openclaw_uid_value }}/bus"
+  register: openclaw_user_service_active
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'Debian'
+    - not ci_test
+    - openclaw_user_service_file.stat.exists
+
+- name: Restart OpenClaw user service when binary changes
+  ansible.builtin.command: systemctl --user restart openclaw-gateway
+  become: true
+  become_user: "{{ openclaw_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ openclaw_uid_value }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ openclaw_uid_value }}/bus"
+  changed_when: true
+  when:
+    - ansible_os_family == 'Debian'
+    - not ci_test
+    - openclaw_user_service_file.stat.exists
+    - openclaw_user_service_active.rc == 0
+    - openclaw_binary_changed | default(false)
+
+- name: Reconcile OpenClaw systemd unit file on upgrades
+  ansible.builtin.template:
+    src: openclaw-host.service.j2
+    dest: /etc/systemd/system/openclaw.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: openclaw_service_unit
+  when:
+    - ansible_os_family == 'Debian'
+    - not ci_test
+    - openclaw_service_file.stat.exists
+    - not openclaw_user_service_file.stat.exists
+
+- name: Reload systemd daemon when unit file changes
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when:
+    - ansible_os_family == 'Debian'
+    - not ci_test
+    - openclaw_service_file.stat.exists
+    - not openclaw_user_service_file.stat.exists
+    - openclaw_service_unit.changed | default(false)
+
+- name: Check whether OpenClaw service is currently active
+  ansible.builtin.command: systemctl is-active openclaw
+  register: openclaw_service_active
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'Debian'
+    - not ci_test
+    - openclaw_service_file.stat.exists
+    - not openclaw_user_service_file.stat.exists
+
+- name: Restart OpenClaw service when binary or unit changes
+  ansible.builtin.systemd:
+    name: openclaw
+    state: restarted
+  when:
+    - ansible_os_family == 'Debian'
+    - not ci_test
+    - openclaw_service_file.stat.exists
+    - not openclaw_user_service_file.stat.exists
+    - openclaw_service_active.rc == 0
+    - (openclaw_binary_changed | default(false)) or (openclaw_service_unit.changed | default(false))
+
 - name: Configure .bashrc for openclaw user (base config)
   ansible.builtin.blockinfile:
     path: "{{ openclaw_home }}/.bashrc"
@@ -102,9 +191,10 @@
     mode: '0644'
     insertafter: EOF
 
-# NOTE: We do NOT create config.yml here - openclaw onboard/configure will do that
-# We also do NOT install the systemd service - openclaw onboard --install-daemon will do that
-# The .openclaw directory structure is created above, but config and daemon are user-initiated
+# NOTE: We do NOT create config.yml here - openclaw onboard/configure will do that.
+# Onboarding installs a user service (openclaw-gateway). On later playbook runs,
+# we restart that user service when the binary changes. Legacy system service
+# installs are reconciled and restarted as a fallback.
 
 - name: Display configuration note
   ansible.builtin.debug:

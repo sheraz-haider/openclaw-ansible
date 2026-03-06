@@ -22,6 +22,7 @@
     update: true
   become: true
   become_user: "{{ openclaw_user }}"
+  register: openclaw_clone_result
   when: not openclaw_repo_exists.stat.exists
 
 - name: Pull latest changes if repo exists
@@ -66,7 +67,10 @@
     PATH: "{{ openclaw_home }}/.local/bin:{{ openclaw_home }}/.local/share/pnpm:/usr/local/bin:/usr/bin:/bin"
     HOME: "{{ openclaw_home }}"
   register: pnpm_build_result
-  changed_when: true  # Build always changes dist/ directory
+  changed_when: >
+    (openclaw_clone_result.changed | default(false)) or
+    (git_pull_result.changed | default(false)) or
+    (pnpm_install_result.changed | default(false))
 
 - name: Display build output
   ansible.builtin.debug:
@@ -123,6 +127,13 @@
       OpenClaw installed from source: {{ openclaw_dev_version.stdout }}
       Repository: {{ openclaw_repo_dir }}
       Binary: {{ openclaw_home }}/.local/bin/openclaw -> {{ openclaw_repo_dir }}/bin/openclaw.js
+
+- name: Record whether development binary changed
+  ansible.builtin.set_fact:
+    openclaw_binary_changed: >
+      {{ (openclaw_clone_result.changed | default(false)) or
+         (git_pull_result.changed | default(false)) or
+         (pnpm_install_result.changed | default(false)) }}
 
 - name: Add development mode info to .bashrc
   ansible.builtin.blockinfile:
